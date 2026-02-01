@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PHILYBOTICS™</title>
+<style>
+  :root {
+    --bg: #f9fafb;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --border: #e5e7eb;
+  }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+  .widget {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    gap: 16px;
+  }
+  .grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,.05);
+    display: flex;
+    flex-direction: column;
+  }
+  .thumb {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    background: #f3f4f6;
+  }
+  .content { padding: 12px 14px; display: grid; gap: 8px; }
+  .item-title { font-weight: 700; font-size: 16px; margin: 0; }
+  .item-title a { color: var(--text); text-decoration: none; }
+  .item-title a:hover { color: var(--accent); text-decoration: underline; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .desc { font-size: 14px; color: #374151; line-height: 1.45; }
+  .attachments { margin-top: 8px; font-size: 13px; }
+  .attachments a { display: inline-block; margin-right: 8px; color: var(--accent); text-decoration: none; }
+  .attachments a:hover { text-decoration: underline; }
+  .footer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+    border-radius: 12px;
+    display:flex; justify-content: space-between; align-items:center;
+    font-size: 12px; color: var(--muted);
+  }
+  .brand a { font-weight: 600; color: var(--text); text-decoration: none; }
+  .brand a:hover { color: var(--accent); text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="widget" id="rssWidget">
+    <div id="grid" class="grid" aria-live="polite"></div>
+
+    <div class="footer">
+      <div class="brand">
+        <a href="https://taplink.cc/philybotics/" target="_blank" rel="noopener">©𝐏𝐇𝐈𝐋𝐘𝐁𝐎𝐓𝐈𝐂𝐒™</a>
+      </div>
+      <div id="fetchedAt">—</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const FEED_URL = "https://phys.org/rss-feed/";
+  const PROXY = (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
+
+  const els = {
+    grid: document.getElementById("grid"),
+    fetchedAt: document.getElementById("fetchedAt"),
+  };
+
+  const stripHTML = (html) => {
+    const div = document.createElement("div");
+    div.innerHTML = html || "";
+    div.querySelectorAll("script,style,noscript").forEach(n => n.remove());
+    return div.textContent.trim();
+  };
+
+  const getImage = (item) => {
+    const media = item.getElementsByTagName("media:content")[0] || item.getElementsByTagName("media:thumbnail")[0];
+    if (media) return media.getAttribute("url") || media.getAttribute("src");
+    const enclosure = Array.from(item.querySelectorAll("enclosure"))
+      .find(e => (e.getAttribute("type") || "").startsWith("image/"));
+    if (enclosure) return enclosure.getAttribute("url");
+    const descHTML = item.querySelector("description")?.textContent || "";
+    const div = document.createElement("div"); div.innerHTML = descHTML;
+    return div.querySelector("img")?.getAttribute("src") || null;
+  };
+
+  const getAttachments = (item) => {
+    const files = [];
+    item.querySelectorAll("enclosure, media\\:content").forEach(el => {
+      const url = el.getAttribute("url") || el.getAttribute("src");
+      const type = el.getAttribute("type") || "";
+      if (url && !type.startsWith("image/")) {
+        files.push({ url, type });
+      }
+    });
+    return files;
+  };
+
+  const fmtDate = (dStr) => {
+    if (!dStr) return "";
+    const d = new Date(dStr);
+    if (isNaN(d)) return stripHTML(dStr);
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric", month: "short", day: "2-digit",
+      hour: "2-digit", minute: "2-digit"
+    }).format(d);
+  };
+
+  async function fetchText(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  }
+
+  async function loadFeed() {
+    let xmlText = "";
+    try {
+      xmlText = await fetchText(FEED_URL);
+    } catch {
+      try {
+        xmlText = await fetchText(PROXY(FEED_URL));
+      } catch {
+        els.grid.innerHTML = `<p style="text-align:center;color:#6b7280;">www.philybotics.ct.ws</p>`;
+        return;
+      }
+    }
+    render(xmlText);
+  }
+
+  function render(xmlText) {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(xmlText, "application/xml");
+    const items = Array.from(xml.querySelectorAll("item"));
+
+    if (!items.length) {
+      els.grid.innerHTML = `<p style="text-align:center;color:#6b7280;">www.philybotics.ct.ws</p>`;
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    items.forEach(item => {
+      const title = item.querySelector("title")?.textContent?.trim() || "(untitled)";
+      const link = item.querySelector("link")?.textContent?.trim() || "#";
+      const pubDate = item.querySelector("pubDate")?.textContent?.trim() || "";
+      const descHTML = item.querySelector("description")?.textContent || "";
+      const desc = stripHTML(descHTML);
+      const img = getImage(item);
+      const files = getAttachments(item);
+
+      const card = document.createElement("article");
+      card.className = "card";
+
+      if (img) {
+        const imgEl = document.createElement("img");
+        imgEl.className = "thumb";
+        imgEl.src = img;
+        imgEl.loading = "lazy";
+        card.appendChild(imgEl);
+      }
+
+      const content = document.createElement("div");
+      content.className = "content";
+
+      const h3 = document.createElement("h3");
+      h3.className = "item-title";
+      const a = document.createElement("a");
+      a.href = link; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = title;
+      h3.appendChild(a);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = fmtDate(pubDate);
+
+      const p = document.createElement("p");
+      p.className = "desc";
+      p.textContent = desc;
+
+      content.append(h3, meta, p);
+
+      if (files.length) {
+        const attach = document.createElement("div");
+        attach.className = "attachments";
+        files.forEach(f => {
+          const fa = document.createElement("a");
+          fa.href = f.url; fa.target = "_blank";
+          fa.textContent = `[${f.type || "file"}]`;
+          attach.appendChild(fa);
+        });
+        content.appendChild(attach);
+      }
+
+      card.appendChild(content);
+      frag.appendChild(card);
+    });
+
+    els.grid.innerHTML = "";
+    els.grid.appendChild(frag);
+    els.fetchedAt.textContent = "Updated: " + new Date().toLocaleString();
+  }
+
+  loadFeed();
+})();
+</script>
+
+<!-- ================= AD FALLBACK PLACEHOLDER ================= -->
+<div id="adFallback" style="
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  background:#ffffff;
+  align-items:center;
+  justify-content:center;
+">
+  <ins style="width:0px;height:0px"
+       data-width="0"
+       data-height="0"
+       class="kc271867a64"
+       data-domain="//data527.click"
+       data-affquery="/b8672cfe09344804ab10/c271867a64/?placementName=default">
+    <script src="//data527.click/js/responsive.js" async></script>
+  </ins>
+</div>
+
+<!-- ================= INSTANT WATCHDOG ================= -->
+<script>
+(() => {
+  const adBox = document.getElementById("adFallback");
+  const grid = document.getElementById("grid");
+  let adMode = false;
+
+  const enterAds = () => {
+    if (adMode) return;
+    adMode = true;
+    adBox.style.display = "flex";
+  };
+
+  const exitAds = () => {
+    if (!adMode) return;
+    adMode = false;
+    adBox.style.display = "none";
+  };
+
+  const observer = new MutationObserver(() => {
+    if (grid.children.length > 0) {
+      exitAds();
+    } else {
+      enterAds();
+    }
+  });
+
+  observer.observe(grid, { childList: true });
+  requestAnimationFrame(() => {
+    if (grid.children.length === 0) enterAds();
+  });
+})();
+</script>
+
+</body>
+</html>
